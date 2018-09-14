@@ -5,10 +5,12 @@ kind of [Freedom Toaster](https://en.wikipedia.org/wiki/Freedom_Toaster).
 
 ## Installation
 
-Require Python 3.
+Requires Python 3.
 
-	virtualenv venv
-	source venv/bin/activate
-	pip install pyforms
-	python cris.py
+    virtualenv venv
+    source venv/bin/activate
+    python setup.py
 
+To run:
+
+    python cris.py
