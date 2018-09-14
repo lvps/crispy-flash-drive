@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 
 import sys
-from PyQt5.QtCore import QDateTime
-from PyQt5.QtWidgets import QApplication, QWidget, QPushButton, QDesktopWidget, QMainWindow, QAction, QGridLayout, \
-	QTextEdit, QLabel, QVBoxLayout, QHBoxLayout
+
+from PyQt5 import QtCore, QtGui
+from PyQt5.QtCore import QDateTime, QAbstractListModel
+from PyQt5.QtWidgets import QApplication, QWidget, QPushButton, QDesktopWidget, QMainWindow, QGridLayout, QTextEdit, \
+	QLabel, QHBoxLayout, QListView
 
 
 class Toaster(QMainWindow):
@@ -12,6 +14,7 @@ class Toaster(QMainWindow):
 		# noinspection PyArgumentList
 		super().__init__()
 		self.status_bar = self.statusBar()
+		self.distro_list = DistroList()
 		self.window()
 
 	def window(self):
@@ -32,12 +35,15 @@ class Toaster(QMainWindow):
 		self.center()
 		self.setWindowTitle('Crispy Flash Drives')
 
-		toast_btn = self.gib_button_pls('Toast!')
-		cancel_btn = self.gib_button_pls('Cancel')
+		toast_btn = self.make_button('Toast!', self.toast_clicked)
+		cancel_btn = self.make_button('Cancel', self.cancel_clicked)
 
 		# Label and selection area (first row)
+		distro_list_view = QListView()
+		distro_list_view.uniformItemSizes = True
+		distro_list_view.setModel(self.distro_list)
 		grid.addWidget(QLabel('Distribution'), 1, 0)
-		grid.addWidget(QTextEdit(), 1, 1)
+		grid.addWidget(distro_list_view, 1, 1)
 
 		# Label and selection area (second row)
 		grid.addWidget(QLabel('Flash drive'), 2, 0)
@@ -48,11 +54,13 @@ class Toaster(QMainWindow):
 		button_grid = QHBoxLayout()
 		button_area.setLayout(button_grid)
 		button_grid.addStretch()  # This is done twice to center buttons horizontally
+		# noinspection PyArgumentList
 		button_grid.addWidget(toast_btn)
+		# noinspection PyArgumentList
 		button_grid.addWidget(cancel_btn)
 		button_grid.addStretch()
 
-		grid.addWidget(button_area, 3, 0, 1, 2) # span both columns (and one row)
+		grid.addWidget(button_area, 3, 0, 1, 2)  # span both columns (and one row)
 
 		self.show()
 
@@ -67,14 +75,52 @@ class Toaster(QMainWindow):
 	def set_status(self, status: str):
 		self.status_bar.showMessage(status)
 
-	def gib_button_pls(self, text: str, tooltip=''):
+	def make_button(self, text: str, action, tooltip=''):
 		button = QPushButton(text, self)
 		if len(tooltip) > 0:
 			button.setToolTip(tooltip)
 		button.resize(button.sizeHint())
-		action = QAction('Do things', self)
-		button.addAction(action)
+		# Works perfectly but it's unresolved, yeah...
+		# noinspection PyUnresolvedReferences
+		button.clicked.connect(action)
 		return button
+
+	def toast_clicked(self):
+		print("toast")
+
+	def cancel_clicked(self):
+		print("cancel")
+
+
+class DistroList(QAbstractListModel):
+	def __init__(self):
+		# noinspection PyArgumentList
+		super().__init__()
+		self.list = []
+		self.list.append(('some_icon.png', 'Ubuntu 18.04 64 bit'))
+		self.list.append(('some_icon.png', 'Arch Linux'))
+		self.list.append(('some_icon.png', 'Debian GNU/Linux 1.0 pre-alpha'))
+
+	def rowCount(self, parent):
+		return len(self.list)
+
+	def data(self, index, role):
+		row = index.row()
+		value = self.list[row]
+
+		# if role == QtCore.Qt.ToolTipRole:
+		# 	return 'test1: ' + value[0] + ' test2: ' + value[1]
+
+		# if role == QtCore.Qt.DecorationRole:
+		# 	pixmap = QtGui.QPixmap(images + 'small2.png')
+		# 	icon = QtGui.QIcon(pixmap)
+		# 	return icon
+
+		if role == QtCore.Qt.DisplayRole:
+			return value[1]
+
+	def flags(self, index):
+		return QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable
 
 
 def diff(start: QDateTime):
