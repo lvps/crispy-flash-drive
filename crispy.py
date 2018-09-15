@@ -6,7 +6,7 @@ import json
 import subprocess
 # noinspection PyUnresolvedReferences
 from PyQt5 import QtCore, QtGui
-from PyQt5.QtCore import QDateTime, QAbstractListModel
+from PyQt5.QtCore import QDateTime, QAbstractListModel, QModelIndex
 from PyQt5.QtWidgets import QApplication, QWidget, QPushButton, QDesktopWidget, QMainWindow, QGridLayout, QLabel, \
 	QHBoxLayout, QListView
 
@@ -167,21 +167,22 @@ class DriveList(QAbstractListModel):
 		new_list = []
 		for device in lsblk["blockdevices"]:
 			if device['name'] not in self.system_drives:
-				vendor = device['vendor'].trim()
-				model = device['model'].trim()
+				vendor = device['vendor'].strip()
+				model = device['model'].strip()
 				size = self.pretty_size(device['size'])
 				device = f"/dev/{device['name']}"
 				new_list.append(f'{vendor} {model}, {size} ({device})')
 
-		if not new_list == self.list:
+		if new_list == self.list:
 			print("No changes")
 		else:
 			print("Drives list changed")
-			was = len(self.list)
+			old_list = self.list
 			self.list = new_list
-			# TODO: which index to use?
-			# TODO: Also, doesn't work despite existing cases of people using the exact same code, since this needs a QModelIndex and not an int
-			self.dataChanged.emit(0, max(len(new_list), was))
+			if len(old_list) > 0:
+				self.removeRows(0, len(old_list))
+			if len(new_list) > 0:
+				self.insertRows(0, len(new_list))
 
 	@staticmethod
 	def pretty_size(ugly_size: str) -> str:
@@ -191,7 +192,7 @@ class DriveList(QAbstractListModel):
 
 	@staticmethod
 	def do_lsblk():
-		lsblk = subprocess.run(['lsblk', '-S', '-J', '-oNAME,LABEL,VENDOR,MODEL,RM,SIZE'], stdout=subprocess.PIPE)
+		lsblk = subprocess.run(['lsblk', '-S', '-J', '-oNAME,VENDOR,MODEL,SIZE'], stdout=subprocess.PIPE)
 		return json.loads(lsblk.stdout.decode('utf-8'))
 
 
