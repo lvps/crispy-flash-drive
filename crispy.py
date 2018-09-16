@@ -2,13 +2,16 @@
 
 import sys
 
+from PyQt5.QtGui import QIcon
+from multiprocessing import Lock
+
 import json
 import subprocess
 # noinspection PyUnresolvedReferences
 from PyQt5 import QtCore, QtGui
 from PyQt5.QtCore import QDateTime, QAbstractListModel, QModelIndex
 from PyQt5.QtWidgets import QApplication, QWidget, QPushButton, QDesktopWidget, QMainWindow, QGridLayout, QLabel, \
-	QHBoxLayout, QListView
+	QHBoxLayout, QListView, QListWidget, QListWidgetItem
 
 
 class Toaster(QMainWindow):
@@ -41,6 +44,7 @@ class Toaster(QMainWindow):
 
 		toast_btn = self.make_button('Toast!', self.toast_clicked)
 		cancel_btn = self.make_button('Cancel', self.cancel_clicked)
+		refresh_btn = self.make_button('Refresh', self.refresh_clicked)
 
 		# Label and selection area (first row)
 		distro_list_view = QListView()
@@ -50,11 +54,8 @@ class Toaster(QMainWindow):
 		grid.addWidget(distro_list_view, 1, 1)
 
 		# Label and selection area (second row)
-		drives_list_view = QListView()
-		drives_list_view.uniformItemSizes = True
-		drives_list_view.setModel(self.drives_list)
 		grid.addWidget(QLabel('Flash drive'), 2, 0)
-		grid.addWidget(drives_list_view, 2, 1)
+		grid.addWidget(self.drives_list, 2, 1)
 
 		# noinspection PyArgumentList
 		button_area = QWidget()
@@ -65,6 +66,8 @@ class Toaster(QMainWindow):
 		button_grid.addWidget(toast_btn)
 		# noinspection PyArgumentList
 		button_grid.addWidget(cancel_btn)
+		# noinspection PyArgumentList
+		button_grid.addWidget(refresh_btn)
 		button_grid.addStretch()
 
 		grid.addWidget(button_area, 3, 0, 1, 2)  # span both columns (and one row)
@@ -94,12 +97,12 @@ class Toaster(QMainWindow):
 
 	def toast_clicked(self):
 		print("toast")
-		# TODO: actually toast
-		self.drives_list.refresh()
 
 	def cancel_clicked(self):
 		print("cancel")
-		# TODO: actually cancel
+
+	def refresh_clicked(self):
+		print("refresh")
 		self.drives_list.refresh()
 
 
@@ -136,31 +139,19 @@ class DistroList(QAbstractListModel):
 		return QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable
 
 
-class DriveList(QAbstractListModel):
+class DriveList(QListWidget):
 	def __init__(self):
 		# noinspection PyArgumentList
 		super().__init__()
 		self.list = []
+		self.busy_lock = Lock()
+		self.busy = set()
 		self.system_drives = set()
 
 		lsblk = self.do_lsblk()
 		for device in lsblk["blockdevices"]:
 			print(f"Detected /dev/{device['name']} as system drive")
 			self.system_drives.add(device['name'])
-
-	# noinspection PyMethodOverriding
-	def rowCount(self, parent):
-		return len(self.list)
-
-	# noinspection PyMethodOverriding
-	def data(self, index, role):
-		row = index.row()
-
-		if role == QtCore.Qt.DisplayRole:
-			return self.list[row]
-
-	def flags(self, index):
-		return QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable
 
 	def refresh(self):
 		lsblk = self.do_lsblk()
@@ -171,7 +162,10 @@ class DriveList(QAbstractListModel):
 				model = device['model'].strip()
 				size = self.pretty_size(device['size'])
 				device = f"/dev/{device['name']}"
-				new_list.append(f'{vendor} {model}, {size} ({device})')
+				if vendor == "ATA":
+					new_list.append(f'{model}, {size} ({device})')
+				else:
+					new_list.append(f'{vendor} {model}, {size} ({device})')
 
 		if new_list == self.list:
 			print("No changes")
@@ -180,14 +174,25 @@ class DriveList(QAbstractListModel):
 			old_list = self.list
 			self.list = new_list
 			if len(old_list) > 0:
-				self.removeRows(0, len(old_list))
+				self.clear()
 			if len(new_list) > 0:
-				self.insertRows(0, len(new_list))
+				with self.busy_lock:  # Maybe needed, maybe not
+					for device in new_list:
+						item = QListWidgetItem(self)
+						item.setText(device)
+						item.setIcon(self.icon_for(device))
+
+	def icon_for(self, device: str) -> QIcon:
+		icon = QIcon()
+		if device in self.busy:  # Lock that somewhere before calling, maybe
+			return icon.fromTheme("dialog-warning")
+		else:
+			return icon.fromTheme("drive-removable-media")
 
 	@staticmethod
 	def pretty_size(ugly_size: str) -> str:
 		unit = ugly_size[-1:]
-		size = ugly_size[:-1]
+		size = ugly_size[:-1].replace(',', '.')
 		return f"{size} {unit}iB"
 
 	@staticmethod
