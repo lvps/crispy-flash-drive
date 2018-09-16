@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 import sys
 
+from PyQt5.QtDBus import QDBusConnection, QDBusMessage
 from PyQt5.QtGui import QIcon, QPixmap
 from json import JSONDecodeError
 from multiprocessing import Lock
+from threading import Thread
 
 import json
 import subprocess
 # noinspection PyUnresolvedReferences
 from PyQt5 import QtCore, QtGui
-from PyQt5.QtCore import QDateTime, QSize
+from PyQt5.QtCore import QDateTime, QSize, QObject, QEvent, pyqtSlot
 from PyQt5.QtWidgets import QApplication, QWidget, QPushButton, QDesktopWidget, QMainWindow, QGridLayout, QLabel, \
 	QHBoxLayout, QVBoxLayout, QListWidget, QListWidgetItem
 from dataclasses import dataclass
@@ -33,6 +35,7 @@ class Toaster(QMainWindow):
 
 	def __init__(self, argv: List[str]):
 		if len(argv) <= 1:
+			# TODO: file selection dialog?
 			print("Provide path to distro list JSON file")
 			exit(1)
 
@@ -58,6 +61,9 @@ class Toaster(QMainWindow):
 		self.distro_widget = DistroList(distros)
 		self.drives_list = DriveList()
 		self.window()
+
+		dbus = QDBusConnection.systemBus()
+		dbus.connect('org.freedesktop.UDisks2', '/org/freedesktop/UDisks2', 'org.freedesktop.DBus.ObjectManager', 'InterfacesAdded', self.handle_dbus_signal)
 
 	def window(self):
 		grid = QGridLayout()
@@ -126,6 +132,11 @@ class Toaster(QMainWindow):
 	def refresh_clicked(self):
 		print("refresh")
 		self.drives_list.refresh()
+
+	# Good example (the only one that exists, actually): https://stackoverflow.com/q/38142809
+	@pyqtSlot(QDBusMessage, name='handle_dbus_signal')
+	def handle_dbus_signal(self, msg):
+		print(msg)
 
 
 @dataclass
