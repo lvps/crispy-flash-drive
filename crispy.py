@@ -2,16 +2,17 @@
 
 import sys
 
-from PyQt5.QtGui import QIcon
+from PyQt5.QtGui import QIcon, QPixmap
 from multiprocessing import Lock
 
 import json
 import subprocess
 # noinspection PyUnresolvedReferences
 from PyQt5 import QtCore, QtGui
-from PyQt5.QtCore import QDateTime, QAbstractListModel, QModelIndex
+from PyQt5.QtCore import QDateTime, QSize
 from PyQt5.QtWidgets import QApplication, QWidget, QPushButton, QDesktopWidget, QMainWindow, QGridLayout, QLabel, \
-	QHBoxLayout, QListView, QListWidget, QListWidgetItem
+	QHBoxLayout, QVBoxLayout, QListWidget, QListWidgetItem
+from dataclasses import dataclass
 
 
 def make_button(text: str, action, icon=None, tooltip=''):
@@ -116,28 +117,76 @@ class DistroList(QWidget):
 		self.list.append(('some_icon.png', 'Arch Linux'))
 		self.list.append(('some_icon.png', 'Debian GNU/Linux 1.0 pre-alpha'))
 
-		grid = QHBoxLayout()
+		grid = QGridLayout()
+		# Three columns: sides fixed, center can expand
+		grid.setColumnStretch(0, 0)
+		grid.setColumnStretch(1, 1)
+		grid.setColumnStretch(2, 0)
 		self.setLayout(grid)
 
 		icon = QIcon()
 		# TODO: better shortcuts than Alt+P and Alt+N
 		# TODO: no text, just buttons. LARGE buttons.
 		# noinspection PyArgumentList
-		grid.addWidget(make_button('&Previous', self.scroll_left, icon.fromTheme('arrow-left')))
+		grid.addWidget(make_button('&Previous', self.scroll_left, icon.fromTheme('arrow-left')), 1, 0)
 
-		grid.addStretch()
-
-		grid.addStretch()
-
-		icon = QIcon()
+		self.distro_widget = DistroView(Distro("Debian 1.0 pre-alpha del '93", "debian.iso", "logos/debian.svg", "Debian è un sublime sistema molto operativo. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Vestibulum aliquet purus in nisi tempus, vel consectetur est facilisis. Vivamus augue felis, condimentum sit amet eros et, ornare pretium massa. Etiam vel ex vulputate, lacinia sapien sed, bibendum mauris."))
 		# noinspection PyArgumentList
-		grid.addWidget(make_button('&Next', self.scroll_right, icon.fromTheme('arrow-right')))
+		grid.addWidget(self.distro_widget, 1, 1)
+
+		# noinspection PyArgumentList
+		grid.addWidget(make_button('&Next', self.scroll_right, icon.fromTheme('arrow-right')), 1, 2)
 
 	def scroll_left(self):
 		print("left")
 
 	def scroll_right(self):
 		print("right")
+
+
+@dataclass
+class Distro:
+	name: str
+	file: str
+	logo: str  # TODO: use QPixmap here? Or QIcon?
+	description: str
+
+
+class DistroView(QWidget):
+	def __init__(self, distro: Distro):
+		# noinspection PyArgumentList
+		super().__init__()
+		stack = QVBoxLayout()
+		self.setLayout(stack)
+		self.distro = None
+
+		self.icon_widget = QLabel(self)
+		self.icon_widget.setAlignment(QtCore.Qt.AlignCenter)
+		# noinspection PyArgumentList
+		stack.addWidget(self.icon_widget)
+		self.title_widget = QLabel(self)
+		self.title_widget.setAlignment(QtCore.Qt.AlignCenter)
+		# noinspection PyArgumentList
+		stack.addWidget(self.title_widget)
+		self.description_widget = QLabel(self)
+		# self.description_widget.setAlignment(QtCore.Qt.AlignCenter)
+		self.description_widget.setWordWrap(True)
+		# noinspection PyArgumentList
+		stack.addWidget(self.description_widget)
+		stack.addStretch()
+
+		self.set_distro(distro)
+
+	def set_distro(self, distro: Distro):
+		self.distro = distro
+		self.title_widget.setText(f"<h2>{distro.name}</h2>")
+		self.description_widget.setText(distro.description)
+		size = QSize()
+		size.setHeight(100)
+		size.setWidth(100)
+		pixmap = QIcon(distro.logo).pixmap(size)
+		# noinspection PyArgumentList
+		self.icon_widget.setPixmap(pixmap)
 
 
 class DriveList(QListWidget):
