@@ -14,6 +14,19 @@ from PyQt5.QtWidgets import QApplication, QWidget, QPushButton, QDesktopWidget, 
 	QHBoxLayout, QListView, QListWidget, QListWidgetItem
 
 
+def make_button(text: str, action, icon=None, tooltip=''):
+	button = QPushButton(text)
+	if len(tooltip) > 0:
+		button.setToolTip(tooltip)
+	if icon is not None:
+		button.setIcon(icon)
+	button.resize(button.sizeHint())
+	# Works perfectly but it's unresolved, yeah...
+	# noinspection PyUnresolvedReferences
+	button.clicked.connect(action)
+	return button
+
+
 class Toaster(QMainWindow):
 
 	def __init__(self):
@@ -42,16 +55,14 @@ class Toaster(QMainWindow):
 		self.center()
 		self.setWindowTitle('Crispy Flash Drives')
 
-		toast_btn = self.make_button('Toast!', self.toast_clicked)
-		cancel_btn = self.make_button('Cancel', self.cancel_clicked)
-		refresh_btn = self.make_button('Refresh', self.refresh_clicked)
+		toast_btn = make_button('Toast!', self.toast_clicked)
+		cancel_btn = make_button('Cancel', self.cancel_clicked)
+		refresh_btn = make_button('Refresh', self.refresh_clicked)
 
 		# Label and selection area (first row)
-		distro_list_view = QListView()
-		distro_list_view.uniformItemSizes = True
-		distro_list_view.setModel(self.distro_list)
-		grid.addWidget(QLabel('Distribution'), 1, 0)
-		grid.addWidget(distro_list_view, 1, 1)
+		# noinspection PyArgumentList
+		distro_list_view = DistroList()
+		grid.addWidget(distro_list_view, 1, 0, 1, 2)  # span both columns (and one row)
 
 		# Label and selection area (second row)
 		grid.addWidget(QLabel('Flash drive'), 2, 0)
@@ -85,16 +96,6 @@ class Toaster(QMainWindow):
 	def set_status(self, status: str):
 		self.status_bar.showMessage(status)
 
-	def make_button(self, text: str, action, tooltip=''):
-		button = QPushButton(text, self)
-		if len(tooltip) > 0:
-			button.setToolTip(tooltip)
-		button.resize(button.sizeHint())
-		# Works perfectly but it's unresolved, yeah...
-		# noinspection PyUnresolvedReferences
-		button.clicked.connect(action)
-		return button
-
 	def toast_clicked(self):
 		print("toast")
 
@@ -106,7 +107,7 @@ class Toaster(QMainWindow):
 		self.drives_list.refresh()
 
 
-class DistroList(QAbstractListModel):
+class DistroList(QWidget):
 	def __init__(self):
 		# noinspection PyArgumentList
 		super().__init__()
@@ -115,28 +116,28 @@ class DistroList(QAbstractListModel):
 		self.list.append(('some_icon.png', 'Arch Linux'))
 		self.list.append(('some_icon.png', 'Debian GNU/Linux 1.0 pre-alpha'))
 
-	# noinspection PyMethodOverriding
-	def rowCount(self, parent):
-		return len(self.list)
+		grid = QHBoxLayout()
+		self.setLayout(grid)
 
-	# noinspection PyMethodOverriding
-	def data(self, index, role):
-		row = index.row()
-		value = self.list[row]
+		icon = QIcon()
+		# TODO: better shortcuts than Alt+P and Alt+N
+		# TODO: no text, just buttons. LARGE buttons.
+		# noinspection PyArgumentList
+		grid.addWidget(make_button('&Previous', self.scroll_left, icon.fromTheme('arrow-left')))
 
-		# if role == QtCore.Qt.ToolTipRole:
-		# 	return 'test1: ' + value[0] + ' test2: ' + value[1]
+		grid.addStretch()
 
-		# if role == QtCore.Qt.DecorationRole:
-		# 	pixmap = QtGui.QPixmap(images + 'small2.png')
-		# 	icon = QtGui.QIcon(pixmap)
-		# 	return icon
+		grid.addStretch()
 
-		if role == QtCore.Qt.DisplayRole:
-			return value[1]
+		icon = QIcon()
+		# noinspection PyArgumentList
+		grid.addWidget(make_button('&Next', self.scroll_right, icon.fromTheme('arrow-right')))
 
-	def flags(self, index):
-		return QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable
+	def scroll_left(self):
+		print("left")
+
+	def scroll_right(self):
+		print("right")
 
 
 class DriveList(QListWidget):
