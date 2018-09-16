@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-
 import sys
 
 from PyQt5.QtGui import QIcon, QPixmap
+from json import JSONDecodeError
 from multiprocessing import Lock
 
 import json
@@ -13,6 +13,7 @@ from PyQt5.QtCore import QDateTime, QSize
 from PyQt5.QtWidgets import QApplication, QWidget, QPushButton, QDesktopWidget, QMainWindow, QGridLayout, QLabel, \
 	QHBoxLayout, QVBoxLayout, QListWidget, QListWidgetItem
 from dataclasses import dataclass
+from typing import List
 
 
 def make_button(text: str, action, icon=None, tooltip=''):
@@ -30,11 +31,31 @@ def make_button(text: str, action, icon=None, tooltip=''):
 
 class Toaster(QMainWindow):
 
-	def __init__(self):
+	def __init__(self, argv: List[str]):
+		if len(argv) <= 1:
+			print("Provide path to distro list JSON file")
+			exit(1)
+
+		json_distros = None
+		distros = []
+		try:
+			with open(argv[1]) as file:
+				json_distros = json.loads(file.read())
+		except FileNotFoundError:
+			print(f"Cannot open {argv[1]} for reading")
+			exit(1)
+		except JSONDecodeError as e:
+			print(f"JSON decode error in {argv[1]} on line {e.lineno}, col {e.colno}: {e.msg}")
+			exit(1)
+
+		for json_distro in json_distros:
+			distro = Distro(json_distro['name'], json_distro['file'], json_distro['logo'], json_distro['description'])
+			distros.append(distro)
+
 		# noinspection PyArgumentList
 		super().__init__()
 		self.status_bar = self.statusBar()
-		self.distro_list = DistroList()
+		self.distro_widget = DistroList(distros)
 		self.drives_list = DriveList()
 		self.window()
 
@@ -62,8 +83,7 @@ class Toaster(QMainWindow):
 
 		# Label and selection area (first row)
 		# noinspection PyArgumentList
-		distro_list_view = DistroList()
-		grid.addWidget(distro_list_view, 1, 0, 1, 2)  # span both columns (and one row)
+		grid.addWidget(self.distro_widget, 1, 0, 1, 2)  # span both columns (and one row)
 
 		# Label and selection area (second row)
 		grid.addWidget(QLabel('Flash drive'), 2, 0)
@@ -108,14 +128,20 @@ class Toaster(QMainWindow):
 		self.drives_list.refresh()
 
 
+@dataclass
+class Distro:
+	name: str
+	file: str
+	logo: str  # TODO: use QPixmap here? Or QIcon?
+	description: str
+
+
 class DistroList(QWidget):
-	def __init__(self):
+	def __init__(self, distros: List[Distro]):
 		# noinspection PyArgumentList
 		super().__init__()
-		self.list = []
-		self.list.append(('some_icon.png', 'Ubuntu 18.04 64 bit'))
-		self.list.append(('some_icon.png', 'Arch Linux'))
-		self.list.append(('some_icon.png', 'Debian GNU/Linux 1.0 pre-alpha'))
+		self.list = distros
+		self.position = 0
 
 		grid = QGridLayout()
 		# Three columns: sides fixed, center can expand
@@ -130,7 +156,7 @@ class DistroList(QWidget):
 		# noinspection PyArgumentList
 		grid.addWidget(make_button('&Previous', self.scroll_left, icon.fromTheme('arrow-left')), 1, 0)
 
-		self.distro_widget = DistroView(Distro("Debian 1.0 pre-alpha del '93", "debian.iso", "logos/debian.svg", "Debian è un sublime sistema molto operativo. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Vestibulum aliquet purus in nisi tempus, vel consectetur est facilisis. Vivamus augue felis, condimentum sit amet eros et, ornare pretium massa. Etiam vel ex vulputate, lacinia sapien sed, bibendum mauris."))
+		self.distro_widget = DistroView(distros[0])
 		# noinspection PyArgumentList
 		grid.addWidget(self.distro_widget, 1, 1)
 
@@ -138,18 +164,15 @@ class DistroList(QWidget):
 		grid.addWidget(make_button('&Next', self.scroll_right, icon.fromTheme('arrow-right')), 1, 2)
 
 	def scroll_left(self):
-		print("left")
+		self.position -= 1
+		if self.position < 0:
+			self.position = len(self.list) - 1
+		self.distro_widget.set_distro(self.list[self.position])
 
 	def scroll_right(self):
-		print("right")
-
-
-@dataclass
-class Distro:
-	name: str
-	file: str
-	logo: str  # TODO: use QPixmap here? Or QIcon?
-	description: str
+		self.position += 1
+		self.position %= len(self.list)
+		self.distro_widget.set_distro(self.list[self.position])
 
 
 class DistroView(QWidget):
@@ -260,5 +283,5 @@ def diff(start: QDateTime):
 
 if __name__ == '__main__':
 	app = QApplication(sys.argv)
-	ex = Toaster()
+	ex = Toaster(app.arguments())
 	sys.exit(app.exec_())
