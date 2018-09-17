@@ -79,7 +79,7 @@ class Toaster(QMainWindow):
 
 	def central(self, grid):
 		self.set_status('Ready to toast')
-		self.resize(300, 400)
+		self.resize(300, 550)
 		self.center()
 		self.setWindowTitle('Crispy Flash Drives')
 
