@@ -251,11 +251,14 @@ class DriveList(QListWidget):
 				vendor = device['vendor'].strip()
 				model = device['model'].strip()
 				size = self.pretty_size(device['size'])
-				device = f"/dev/{device['name']}"
+				path = f"/dev/{device['name']}"
+				# serial = device['serial'].strip() + ', '
 				if vendor == "ATA":
-					new_list.append(f'{model}, {size} ({device})')
+					vendor = ''
 				else:
-					new_list.append(f'{vendor} {model}, {size} ({device})')
+					vendor += ' '
+
+				new_list.append(f'{vendor}{model}, {size} ({path})')
 
 		if new_list == self.list:
 			print("No changes")
@@ -287,7 +290,7 @@ class DriveList(QListWidget):
 
 	@staticmethod
 	def do_lsblk():
-		lsblk = subprocess.run(['lsblk', '-S', '-J', '-oNAME,VENDOR,MODEL,SIZE'], stdout=subprocess.PIPE)
+		lsblk = subprocess.run(['lsblk', '-S', '-J', '-oNAME,VENDOR,MODEL,SIZE,SERIAL'], stdout=subprocess.PIPE)
 		return json.loads(lsblk.stdout.decode('utf-8'))
 
 
