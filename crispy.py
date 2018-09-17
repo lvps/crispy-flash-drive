@@ -2,16 +2,15 @@
 import sys
 
 from PyQt5.QtDBus import QDBusConnection, QDBusMessage
-from PyQt5.QtGui import QIcon, QPixmap
+from PyQt5.QtGui import QIcon  # QFontMetrics, QFont
 from json import JSONDecodeError
 from multiprocessing import Lock
-from threading import Thread
 
 import json
 import subprocess
 # noinspection PyUnresolvedReferences
 from PyQt5 import QtCore, QtGui
-from PyQt5.QtCore import QDateTime, QSize, QObject, QEvent, pyqtSlot
+from PyQt5.QtCore import QDateTime, QSize, pyqtSlot
 from PyQt5.QtWidgets import QApplication, QWidget, QPushButton, QDesktopWidget, QMainWindow, QGridLayout, QLabel, \
 	QHBoxLayout, QVBoxLayout, QListWidget, QListWidgetItem
 from dataclasses import dataclass
@@ -77,7 +76,7 @@ class Toaster(QMainWindow):
 		self.central(grid)
 		self.setCentralWidget(widg)
 
-	def central(self, grid):
+	def central(self, grid: QGridLayout):
 		self.set_status('Ready to toast')
 		self.resize(300, 550)
 		self.center()
@@ -135,8 +134,13 @@ class Toaster(QMainWindow):
 
 	# Good example (the only one that exists, actually): https://stackoverflow.com/q/38142809
 	@pyqtSlot(QDBusMessage, name='handle_dbus_signal')
-	def handle_dbus_signal(self, msg):
-		print(msg)
+	def handle_dbus_signal(self, msg: QDBusMessage):
+		if 'org.freedesktop.UDisks2.Drive' in msg.arguments()[1]:
+			vendor = msg.arguments()[1]['org.freedesktop.UDisks2.Drive']['Vendor']
+			model = msg.arguments()[1]['org.freedesktop.UDisks2.Drive']['Model']
+			# serial = msg.arguments()[1]['org.freedesktop.UDisks2.Drive']['Serial']
+			print(f"Detected new device: {vendor} {model}")
+			self.drives_list.refresh()
 
 
 @dataclass
@@ -231,6 +235,8 @@ class DriveList(QListWidget):
 		self.busy_lock = Lock()
 		self.busy = set()
 		self.system_drives = set()
+		# Enable to limit DriveList height (e.g. to 6 lines)
+		# self.setMaximumHeight(QFontMetrics(QFont()).height() * 6)
 
 		lsblk = self.do_lsblk()
 		for device in lsblk["blockdevices"]:
