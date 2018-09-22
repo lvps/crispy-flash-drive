@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 import sys
 
+import argparse
 from PyQt5.QtDBus import QDBusConnection, QDBusMessage
-from PyQt5.QtGui import QIcon  # QFontMetrics, QFont
+from PyQt5.QtGui import QIcon, QPixmap  # QFontMetrics, QFont
 from json import JSONDecodeError
 from multiprocessing import Lock
 
@@ -12,7 +13,7 @@ import subprocess
 from PyQt5 import QtCore, QtGui
 from PyQt5.QtCore import QDateTime, QSize, pyqtSlot
 from PyQt5.QtWidgets import QApplication, QWidget, QPushButton, QDesktopWidget, QMainWindow, QGridLayout, QLabel, \
-	QHBoxLayout, QVBoxLayout, QListWidget, QListWidgetItem
+	QHBoxLayout, QVBoxLayout, QListWidget, QListWidgetItem, QFileDialog
 from dataclasses import dataclass
 from typing import List
 
@@ -33,25 +34,49 @@ def make_button(text: str, action, icon=None, tooltip=''):
 class Toaster(QMainWindow):
 
 	def __init__(self, argv: List[str]):
-		if len(argv) <= 1:
-			# TODO: file selection dialog?
-			print("Provide path to distro list JSON file")
+		parser = argparse.ArgumentParser(description='"Toast" Linux distros or other ISO files on USB drives.')
+		parser.add_argument('json', nargs='?', type=str, help="Path to JSON file with available distros")
+		parser.add_argument('-k', '--kiosk', action='store_true',
+			help="Enable kiosk mode (ignore any attempt to close)")
+		parser.set_defaults(kiosk=False)
+		args = parser.parse_args(argv[1:])
+		self.kiosk = args.kiosk
+		filename = args.json
+
+		if filename is None:
+			# noinspection PyArgumentList
+			filename = QFileDialog.getOpenFileName(None, "Seleziona il JSON delle distro", '', 'File JSON (*.json)')
+			filename = filename[0]
+
+		# Pressing "cancel" in the file dialog
+		if filename == '':
+			print("Select a file")
 			exit(1)
 
 		json_distros = None
 		distros = []
+		logos = dict()
+
 		try:
-			with open(argv[1]) as file:
+			with open(filename) as file:
 				json_distros = json.loads(file.read())
 		except FileNotFoundError:
-			print(f"Cannot open {argv[1]} for reading")
+			print(f"Cannot open {filename} for reading")
 			exit(1)
 		except JSONDecodeError as e:
-			print(f"JSON decode error in {argv[1]} on line {e.lineno}, col {e.colno}: {e.msg}")
+			print(f"JSON decode error in {filename} on line {e.lineno}, col {e.colno}: {e.msg}")
 			exit(1)
 
 		for json_distro in json_distros:
-			distro = Distro(json_distro['name'], json_distro['file'], json_distro['logo'], json_distro['description'])
+			if json_distro['logo'] in logos:
+				rendered_logo = logos[json_distro['logo']]
+			else:
+				size = QSize()
+				size.setHeight(100)
+				size.setWidth(100)
+				rendered_logo = QIcon(json_distro['logo']).pixmap(size)
+				logos[json_distro['logo']] = rendered_logo
+			distro = Distro(json_distro['name'], json_distro['file'], json_distro['logo'], rendered_logo, json_distro['description'])
 			distros.append(distro)
 
 		# noinspection PyArgumentList
@@ -61,6 +86,7 @@ class Toaster(QMainWindow):
 		self.drives_list = DriveList()
 		self.window()
 
+		# noinspection PyArgumentList
 		dbus = QDBusConnection.systemBus()
 		dbus.connect('org.freedesktop.UDisks2', '/org/freedesktop/UDisks2', 'org.freedesktop.DBus.ObjectManager', 'InterfacesAdded', self.handle_dbus_signal)
 
@@ -90,8 +116,10 @@ class Toaster(QMainWindow):
 		# noinspection PyArgumentList
 		grid.addWidget(self.distro_widget, 1, 0, 1, 2)  # span both columns (and one row)
 
-		# Label and selection area (second row)
+		# Label and selection area (second row), with perfectly valid arguments that PyCharm doesn't understand
+		# noinspection PyArgumentList
 		grid.addWidget(QLabel('Flash drive'), 2, 0)
+		# noinspection PyArgumentList
 		grid.addWidget(self.drives_list, 2, 1)
 
 		# noinspection PyArgumentList
@@ -107,12 +135,15 @@ class Toaster(QMainWindow):
 		button_grid.addWidget(refresh_btn)
 		button_grid.addStretch()
 
+		# Again, valid arguments that PyCharm doesn't understand
+		# noinspection PyArgumentList
 		grid.addWidget(button_area, 3, 0, 1, 2)  # span both columns (and one row)
 
 		self.show()
 
-	# def closeEvent(self, event):
-	# 	event.ignore()
+	def closeEvent(self, event):
+		if self.kiosk:
+			event.ignore()
 
 	def center(self):
 		main_window = self.frameGeometry()
@@ -147,7 +178,8 @@ class Toaster(QMainWindow):
 class Distro:
 	name: str
 	file: str
-	logo: str  # TODO: use QPixmap here? Or QIcon?
+	logo: str
+	rendered_logo: QPixmap
 	description: str
 
 
@@ -219,12 +251,7 @@ class DistroView(QWidget):
 		self.distro = distro
 		self.title_widget.setText(f"<h2>{distro.name}</h2>")
 		self.description_widget.setText(distro.description)
-		size = QSize()
-		size.setHeight(100)
-		size.setWidth(100)
-		pixmap = QIcon(distro.logo).pixmap(size)
-		# noinspection PyArgumentList
-		self.icon_widget.setPixmap(pixmap)
+		self.icon_widget.setPixmap(distro.rendered_logo)
 
 
 class DriveList(QListWidget):
