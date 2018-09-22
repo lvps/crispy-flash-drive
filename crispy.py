@@ -11,9 +11,9 @@ import json
 import subprocess
 # noinspection PyUnresolvedReferences
 from PyQt5 import QtCore, QtGui
-from PyQt5.QtCore import QDateTime, QSize, pyqtSlot
+from PyQt5.QtCore import QDateTime, QSize, pyqtSlot, QThread
 from PyQt5.QtWidgets import QApplication, QWidget, QPushButton, QDesktopWidget, QMainWindow, QGridLayout, QLabel, \
-	QHBoxLayout, QVBoxLayout, QListWidget, QListWidgetItem, QFileDialog
+	QHBoxLayout, QVBoxLayout, QListWidget, QListWidgetItem, QFileDialog, QMessageBox
 from dataclasses import dataclass
 from typing import List
 
@@ -45,7 +45,7 @@ class Toaster(QMainWindow):
 
 		if filename is None:
 			# noinspection PyArgumentList
-			filename = QFileDialog.getOpenFileName(None, "Seleziona il JSON delle distro", '', 'File JSON (*.json)')
+			filename = QFileDialog.getOpenFileName(None, "Select JSON data file", '', 'JSON file (*.json)')
 			filename = filename[0]
 
 		# Pressing "cancel" in the file dialog
@@ -154,13 +154,23 @@ class Toaster(QMainWindow):
 		self.status_bar.showMessage(status)
 
 	def toast_clicked(self):
-		print("toast")
+		# TODO: despite clearSelection(), this is still selected... Check flags? Check toasting_devices?
+		selected = self.drives_list.currentItem()
+		if selected is None:
+			msg_box = QMessageBox(self)
+			msg_box.setIcon(QMessageBox.Warning)
+			msg_box.setText('Select a flash drive to toast')
+			msg_box.setStandardButtons(QMessageBox.Ok)
+			msg_box.exec()
+		else:
+			self.drives_list.set_toasting(selected)
+			# TODO: display progress bar, start thread, keep reading this tutorial: https://nikolak.com/pyqt-threading-tutorial/
+			self.drives_list.clearSelection()
 
 	def cancel_clicked(self):
-		print("cancel")
+		print("cancel")  # TODO: delete this
 
 	def refresh_clicked(self):
-		print("refresh")
 		self.drives_list.refresh()
 
 	# Good example (the only one that exists, actually): https://stackoverflow.com/q/38142809
@@ -258,9 +268,9 @@ class DriveList(QListWidget):
 	def __init__(self):
 		# noinspection PyArgumentList
 		super().__init__()
-		self.list = []
-		self.busy_lock = Lock()
-		self.busy = set()
+		self.devices = dict()
+		self.toasting_lock = Lock()
+		self.toasting = dict()
 		self.system_drives = set()
 		# Enable to limit DriveList height (e.g. to 6 lines)
 		# self.setMaximumHeight(QFontMetrics(QFont()).height() * 6)
@@ -272,42 +282,77 @@ class DriveList(QListWidget):
 
 	def refresh(self):
 		lsblk = self.do_lsblk()
-		new_list = []
+		detected_devices = set()
 		for device in lsblk["blockdevices"]:
 			if device['name'] not in self.system_drives:
-				vendor = device['vendor'].strip()
-				model = device['model'].strip()
-				size = self.pretty_size(device['size'])
-				path = f"/dev/{device['name']}"
-				# serial = device['serial'].strip() + ', '
-				if vendor == "ATA":
-					vendor = ''
-				else:
-					vendor += ' '
+				detected_devices.add(self.get_devstring(device))
 
-				new_list.append(f'{vendor}{model}, {size} ({path})')
-
-		if new_list == self.list:
+		if detected_devices == self.devices.keys():
 			print("No changes")
 		else:
 			print("Drives list changed")
-			old_list = self.list
-			self.list = new_list
-			if len(old_list) > 0:
-				self.clear()
-			if len(new_list) > 0:
-				with self.busy_lock:  # Maybe needed, maybe not
-					for device in new_list:
-						item = QListWidgetItem(self)
-						item.setText(device)
-						item.setIcon(self.icon_for(device))
+			# Can't delete devices while iterating over list, so we need to replace it
+			updated_devices_dict = dict()
+
+			for device in self.devices:
+				if device in detected_devices:
+					print(f"Still there: {device}")
+					updated_devices_dict[device] = self.devices[device]
+				else:
+					print(f"Gone: {device}")
+					self.takeItem(self.row(self.devices[device]))
+					self.unset_toasting(device)  # Why? To get rid of any reference to QListViewItem
+
+			# TODO: move above?
+			for device in detected_devices:
+				if device not in self.devices:
+					print(f"New: {device}")
+					item = QListWidgetItem(self)
+					item.setText(device)
+					item.setIcon(self.icon_for(device))
+					updated_devices_dict[device] = item
+
+			self.devices = updated_devices_dict
+
+	def get_devstring(self, device: dict):
+		vendor = device['vendor'].strip()
+		model = device['model'].strip()
+		size = self.pretty_size(device['size'])
+		path = f"/dev/{device['name']}"
+		# serial = device['serial'].strip() + ', '
+		if vendor == "ATA":
+			vendor = ''
+		else:
+			vendor += ' '
+
+		devstring = f'{vendor}{model}, {size} ({path})'
+
+		while '  ' in devstring:
+			devstring = devstring.replace('  ', ' ')
+
+		return devstring
 
 	def icon_for(self, device: str) -> QIcon:
 		icon = QIcon()
-		if device in self.busy:  # Lock that somewhere before calling, maybe
+		if device in self.toasting:  # Lock that somewhere before calling, maybe
 			return icon.fromTheme("dialog-warning")
 		else:
 			return icon.fromTheme("drive-removable-media")
+
+	def set_toasting(self, item: QListWidgetItem):
+		with self.toasting_lock:
+			drive = item.text()
+			item.setFlags(item.flags() & ~QtCore.Qt.ItemIsEnabled)  # ~QtCore.Qt.ItemIsSelectable is redundant
+			self.toasting[drive] = item
+
+	def unset_toasting(self, device: str):
+		with self.toasting_lock:
+			try:
+				item = self.toasting[device]
+				del self.toasting[device]
+				item.setFlags(item.flags() | QtCore.Qt.ItemIsEnabled)
+			except KeyError:
+				pass
 
 	@staticmethod
 	def pretty_size(ugly_size: str) -> str:
@@ -321,11 +366,17 @@ class DriveList(QListWidget):
 		return json.loads(lsblk.stdout.decode('utf-8'))
 
 
-def diff(start: QDateTime):
-	now = QDateTime()
-	now.currentDateTime().toSecsSinceEpoch()
-	# print(time.toString(Qt.DefaultLocaleLongDate))
-	return now - start.toSecsSinceEpoch()
+class ToastThread(QThread):
+	def __init__(self):
+		QThread.__init__(self)
+		self.start = QDateTime()
+		self.end = QDateTime()
+
+	def __del__(self):
+		self.wait()
+
+	def run(self):
+		self.start.currentDateTime()
 
 
 if __name__ == '__main__':
