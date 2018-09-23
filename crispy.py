@@ -34,7 +34,7 @@ def make_button(text: str, action, icon=None, tooltip=''):
 class Toaster(QMainWindow):
 
 	# Only works if placed HERE
-	progress_signal = pyqtSignal()
+	progress_signal = pyqtSignal(str, int)
 
 	def __init__(self, argv: List[str]):
 		parser = argparse.ArgumentParser(description='"Toast" Linux distros or other ISO files on USB drives.')
@@ -171,14 +171,18 @@ class Toaster(QMainWindow):
 			msg_box.setStandardButtons(QMessageBox.Ok)
 			msg_box.exec()
 		else:
+			# Prevent clicking on it again
 			self.drives_list.set_toasting(selected)
+			self.drives_list.clearSelection()
+
+			# Create progress bar
 			progress = QProgressBar()
 			self.progress_area.addWidget(progress, 0, QtCore.Qt.AlignTop)
-			thread = ToastThread(selected.devpath, self.distro_widget.get_current(), self.progress_signal)
+
+			# Start thread
+			thread = ToastThread(selected.devstring, selected.devpath, self.distro_widget.get_current(), self.progress_signal)
 			self.threads.add(thread)
 			thread.start()
-			# TODO: keep reading this tutorial: https://nikolak.com/pyqt-threading-tutorial/
-			self.drives_list.clearSelection()
 
 	def cancel_clicked(self):
 		print("cancel")  # TODO: delete this
@@ -186,9 +190,9 @@ class Toaster(QMainWindow):
 	def refresh_clicked(self):
 		self.drives_list.refresh()
 
-	@QtCore.pyqtSlot()
-	def toaster_signaled(self):
-		print("Signal signaled")
+	@pyqtSlot(str, int, name='toaster_signaled')
+	def toaster_signaled(self, devstr: str, written: int):
+		print(f"Signal signaled: {written} bytes written on {devstr}")
 
 	# Good example (the only one that exists, actually): https://stackoverflow.com/q/38142809
 	@pyqtSlot(QDBusMessage, name='handle_dbus_add')
@@ -398,11 +402,14 @@ class DriveListItem(QListWidgetItem):
 
 
 class ToastThread(QThread):
-	def __init__(self, dev: str, distro: Distro, signal: pyqtSignal):
+	def __init__(self, devstring: str, path: str, distro: Distro, signal: pyqtSignal):
 		QThread.__init__(self)
 		self.begin_time = QDateTime()
 		self.end_time = QDateTime()
 		self.signal = signal
+		self.devstring = devstring
+		self.path = path
+		self.distro = distro
 
 	def __del__(self):
 		self.wait()
@@ -410,7 +417,7 @@ class ToastThread(QThread):
 	def run(self):
 		self.begin_time.currentDateTime()
 		for i in range(1, 100):
-			self.signal.emit()
+			self.signal.emit(self.devstring, 4096)
 			self.sleep(1)
 		self.end_time.currentDateTime()
 
