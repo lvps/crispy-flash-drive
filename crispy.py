@@ -11,9 +11,9 @@ import json
 import subprocess
 # noinspection PyUnresolvedReferences
 from PyQt5 import QtCore, QtGui
-from PyQt5.QtCore import QDateTime, QSize, pyqtSlot, QThread
+from PyQt5.QtCore import QDateTime, QSize, pyqtSlot, QThread, pyqtSignal
 from PyQt5.QtWidgets import QApplication, QWidget, QPushButton, QDesktopWidget, QMainWindow, QGridLayout, QLabel, \
-	QHBoxLayout, QVBoxLayout, QListWidget, QListWidgetItem, QFileDialog, QMessageBox
+	QHBoxLayout, QVBoxLayout, QListWidget, QListWidgetItem, QFileDialog, QMessageBox, QProgressBar
 from dataclasses import dataclass
 from typing import List
 
@@ -33,6 +33,9 @@ def make_button(text: str, action, icon=None, tooltip=''):
 
 class Toaster(QMainWindow):
 
+	# Only works if placed HERE
+	progress_signal = pyqtSignal()
+
 	def __init__(self, argv: List[str]):
 		parser = argparse.ArgumentParser(description='"Toast" Linux distros or other ISO files on USB drives.')
 		parser.add_argument('json', nargs='?', type=str, help="Path to JSON file with available distros")
@@ -41,6 +44,7 @@ class Toaster(QMainWindow):
 		parser.set_defaults(kiosk=False)
 		args = parser.parse_args(argv[1:])
 		self.kiosk = args.kiosk
+		self.threads = set()
 		filename = args.json
 
 		if filename is None:
@@ -81,28 +85,28 @@ class Toaster(QMainWindow):
 
 		# noinspection PyArgumentList
 		super().__init__()
+		self.progress_signal.connect(self.toaster_signaled)
 		self.status_bar = self.statusBar()
+		# noinspection PyArgumentList
+		self.progress_area = QVBoxLayout()
 		self.distro_widget = DistroList(distros)
 		self.drives_list = DriveList()
 		self.window()
 
 		# noinspection PyArgumentList
 		dbus = QDBusConnection.systemBus()
-		dbus.connect('org.freedesktop.UDisks2', '/org/freedesktop/UDisks2', 'org.freedesktop.DBus.ObjectManager', 'InterfacesAdded', self.handle_dbus_signal)
+		dbus.connect('org.freedesktop.UDisks2', '/org/freedesktop/UDisks2', 'org.freedesktop.DBus.ObjectManager', 'InterfacesAdded', self.handle_dbus_add)
+		dbus.connect('org.freedesktop.UDisks2', '/org/freedesktop/UDisks2', 'org.freedesktop.DBus.ObjectManager', 'InterfacesRemoved', self.handle_dbus_remove)
 
 	def window(self):
-		grid = QGridLayout()
-		grid.setSpacing(10)
-		# Two columns: left fixed, right can expand
-		grid.setColumnStretch(0, 0)
-		grid.setColumnStretch(1, 1)
 		# noinspection PyArgumentList
-		widg = QWidget()
-		widg.setLayout(grid)
-		self.central(grid)
-		self.setCentralWidget(widg)
+		the_widget = QWidget()
+		the_layout = QVBoxLayout()
+		the_widget.setLayout(the_layout)
+		self.central(the_layout)
+		self.setCentralWidget(the_widget)
 
-	def central(self, grid: QGridLayout):
+	def central(self, central: QVBoxLayout):
 		self.set_status('Ready to toast')
 		self.resize(300, 550)
 		self.center()
@@ -112,16 +116,15 @@ class Toaster(QMainWindow):
 		cancel_btn = make_button('Cancel', self.cancel_clicked)
 		refresh_btn = make_button('Refresh', self.refresh_clicked)
 
-		# Label and selection area (first row)
-		# noinspection PyArgumentList
-		grid.addWidget(self.distro_widget, 1, 0, 1, 2)  # span both columns (and one row)
+		# Distro selector
+		central.addWidget(self.distro_widget, 1, QtCore.Qt.AlignTop)
+		central.addStretch()
 
-		# Label and selection area (second row), with perfectly valid arguments that PyCharm doesn't understand
-		# noinspection PyArgumentList
-		grid.addWidget(QLabel('Flash drive'), 2, 0)
-		# noinspection PyArgumentList
-		grid.addWidget(self.drives_list, 2, 1)
+		# Label and selection area
+		central.addWidget(QLabel('Flash drive'), 0, QtCore.Qt.AlignLeft)
+		central.addWidget(self.drives_list, 0, QtCore.Qt.AlignBottom)
 
+		# Button area
 		# noinspection PyArgumentList
 		button_area = QWidget()
 		button_grid = QHBoxLayout()
@@ -135,9 +138,14 @@ class Toaster(QMainWindow):
 		button_grid.addWidget(refresh_btn)
 		button_grid.addStretch()
 
+		# noinspection PyArgumentList
+		progress_widget = QWidget()
+		progress_widget.setLayout(self.progress_area)
+		central.addWidget(progress_widget, 0, QtCore.Qt.AlignBottom)
+
 		# Again, valid arguments that PyCharm doesn't understand
 		# noinspection PyArgumentList
-		grid.addWidget(button_area, 3, 0, 1, 2)  # span both columns (and one row)
+		central.addWidget(button_area)  # span both columns (and one row)
 
 		self.show()
 
@@ -155,7 +163,7 @@ class Toaster(QMainWindow):
 
 	def toast_clicked(self):
 		# TODO: despite clearSelection(), this is still selected... Check flags? Check toasting_devices?
-		selected = self.drives_list.currentItem()
+		selected: DriveListItem = self.drives_list.currentItem()
 		if selected is None:
 			msg_box = QMessageBox(self)
 			msg_box.setIcon(QMessageBox.Warning)
@@ -164,7 +172,12 @@ class Toaster(QMainWindow):
 			msg_box.exec()
 		else:
 			self.drives_list.set_toasting(selected)
-			# TODO: display progress bar, start thread, keep reading this tutorial: https://nikolak.com/pyqt-threading-tutorial/
+			progress = QProgressBar()
+			self.progress_area.addWidget(progress, 0, QtCore.Qt.AlignTop)
+			thread = ToastThread(selected.devpath, self.distro_widget.get_current(), self.progress_signal)
+			self.threads.add(thread)
+			thread.start()
+			# TODO: keep reading this tutorial: https://nikolak.com/pyqt-threading-tutorial/
 			self.drives_list.clearSelection()
 
 	def cancel_clicked(self):
@@ -173,14 +186,24 @@ class Toaster(QMainWindow):
 	def refresh_clicked(self):
 		self.drives_list.refresh()
 
+	@QtCore.pyqtSlot()
+	def toaster_signaled(self):
+		print("Signal signaled")
+
 	# Good example (the only one that exists, actually): https://stackoverflow.com/q/38142809
-	@pyqtSlot(QDBusMessage, name='handle_dbus_signal')
-	def handle_dbus_signal(self, msg: QDBusMessage):
+	@pyqtSlot(QDBusMessage, name='handle_dbus_add')
+	def handle_dbus_add(self, msg: QDBusMessage):
 		if 'org.freedesktop.UDisks2.Drive' in msg.arguments()[1]:
 			vendor = msg.arguments()[1]['org.freedesktop.UDisks2.Drive']['Vendor']
 			model = msg.arguments()[1]['org.freedesktop.UDisks2.Drive']['Model']
 			# serial = msg.arguments()[1]['org.freedesktop.UDisks2.Drive']['Serial']
-			print(f"Detected new device: {vendor} {model}")
+			print(f"Dbus detected new device: {vendor} {model}")
+			self.drives_list.refresh()
+
+	@pyqtSlot(QDBusMessage, name='handle_dbus_remove')
+	def handle_dbus_remove(self, msg: QDBusMessage):
+		if 'org.freedesktop.UDisks2.Drive' in msg.arguments()[1]:
+			print(f"Dbus detected device removal")
 			self.drives_list.refresh()
 
 
@@ -230,6 +253,9 @@ class DistroList(QWidget):
 		self.position += 1
 		self.position %= len(self.list)
 		self.distro_widget.set_distro(self.list[self.position])
+
+	def get_current(self) -> Distro:
+		return self.list[self.position]
 
 
 class DistroView(QWidget):
@@ -303,13 +329,11 @@ class DriveList(QListWidget):
 					self.takeItem(self.row(self.devices[device]))
 					self.unset_toasting(device)  # Why? To get rid of any reference to QListViewItem
 
-			# TODO: move above?
 			for device in detected_devices:
+				path = device[device.rfind('(')+1:device.rfind(')')]
 				if device not in self.devices:
 					print(f"New: {device}")
-					item = QListWidgetItem(self)
-					item.setText(device)
-					item.setIcon(self.icon_for(device))
+					item = DriveListItem(self, device, path)
 					updated_devices_dict[device] = item
 
 			self.devices = updated_devices_dict
@@ -318,7 +342,7 @@ class DriveList(QListWidget):
 		vendor = device['vendor'].strip()
 		model = device['model'].strip()
 		size = self.pretty_size(device['size'])
-		path = f"/dev/{device['name']}"
+		path = self.get_devpath(device)
 		# serial = device['serial'].strip() + ', '
 		if vendor == "ATA":
 			vendor = ''
@@ -332,12 +356,9 @@ class DriveList(QListWidget):
 
 		return devstring
 
-	def icon_for(self, device: str) -> QIcon:
-		icon = QIcon()
-		if device in self.toasting:  # Lock that somewhere before calling, maybe
-			return icon.fromTheme("dialog-warning")
-		else:
-			return icon.fromTheme("drive-removable-media")
+	@staticmethod
+	def get_devpath(device: dict):
+		return f"/dev/{device['name']}"
 
 	def set_toasting(self, item: QListWidgetItem):
 		with self.toasting_lock:
@@ -366,17 +387,32 @@ class DriveList(QListWidget):
 		return json.loads(lsblk.stdout.decode('utf-8'))
 
 
+class DriveListItem(QListWidgetItem):
+	def __init__(self, parent: QWidget, devstring: str, devpath: str):
+		super().__init__(parent)
+		self.devstring = devstring
+		self.devpath = devpath
+		self.setText(devstring)
+		icon = QIcon()
+		self.setIcon(icon.fromTheme("drive-removable-media"))
+
+
 class ToastThread(QThread):
-	def __init__(self):
+	def __init__(self, dev: str, distro: Distro, signal: pyqtSignal):
 		QThread.__init__(self)
-		self.start = QDateTime()
-		self.end = QDateTime()
+		self.begin_time = QDateTime()
+		self.end_time = QDateTime()
+		self.signal = signal
 
 	def __del__(self):
 		self.wait()
 
 	def run(self):
-		self.start.currentDateTime()
+		self.begin_time.currentDateTime()
+		for i in range(1, 100):
+			self.signal.emit()
+			self.sleep(1)
+		self.end_time.currentDateTime()
 
 
 if __name__ == '__main__':
