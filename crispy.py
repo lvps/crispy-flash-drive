@@ -162,9 +162,8 @@ class Toaster(QMainWindow):
 		self.status_bar.showMessage(status)
 
 	def toast_clicked(self):
-		# TODO: despite clearSelection(), this is still selected... Check flags? Check toasting_devices?
 		selected: DriveListItem = self.drives_list.currentItem()
-		if selected is None:
+		if selected is None or self.drives_list.is_toasting(selected):
 			msg_box = QMessageBox(self)
 			msg_box.setIcon(QMessageBox.Warning)
 			msg_box.setText('Select a flash drive to toast')
@@ -294,6 +293,16 @@ class DistroView(QWidget):
 		self.icon_widget.setPixmap(distro.rendered_logo)
 
 
+class DriveListItem(QListWidgetItem):
+	def __init__(self, parent: QWidget, devstring: str, devpath: str):
+		super().__init__(parent)
+		self.devstring = devstring
+		self.devpath = devpath
+		self.setText(devstring)
+		icon = QIcon()
+		self.setIcon(icon.fromTheme("drive-removable-media"))
+
+
 class DriveList(QListWidget):
 	def __init__(self):
 		# noinspection PyArgumentList
@@ -380,6 +389,10 @@ class DriveList(QListWidget):
 				pass
 
 	@staticmethod
+	def is_toasting(item: DriveListItem) -> bool:
+		return not (item.flags() & QtCore.Qt.ItemIsEnabled)
+
+	@staticmethod
 	def pretty_size(ugly_size: str) -> str:
 		unit = ugly_size[-1:]
 		size = ugly_size[:-1].replace(',', '.')
@@ -389,16 +402,6 @@ class DriveList(QListWidget):
 	def do_lsblk():
 		lsblk = subprocess.run(['lsblk', '-S', '-J', '-oNAME,VENDOR,MODEL,SIZE,SERIAL'], stdout=subprocess.PIPE)
 		return json.loads(lsblk.stdout.decode('utf-8'))
-
-
-class DriveListItem(QListWidgetItem):
-	def __init__(self, parent: QWidget, devstring: str, devpath: str):
-		super().__init__(parent)
-		self.devstring = devstring
-		self.devpath = devpath
-		self.setText(devstring)
-		icon = QIcon()
-		self.setIcon(icon.fromTheme("drive-removable-media"))
 
 
 class ToastThread(QThread):
