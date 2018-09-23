@@ -39,8 +39,7 @@ class Toaster(QMainWindow):
 	def __init__(self, argv: List[str]):
 		parser = argparse.ArgumentParser(description='"Toast" Linux distros or other ISO files on USB drives.')
 		parser.add_argument('json', nargs='?', type=str, help="Path to JSON file with available distros")
-		parser.add_argument('-k', '--kiosk', action='store_true',
-			help="Enable kiosk mode (ignore any attempt to close)")
+		parser.add_argument('-k', '--kiosk', action='store_true', help="Enable kiosk mode (ignore any attempt to close)")
 		parser.set_defaults(kiosk=False)
 		args = parser.parse_args(argv[1:])
 		self.kiosk = args.kiosk
@@ -75,10 +74,9 @@ class Toaster(QMainWindow):
 			if json_distro['logo'] in logos:
 				rendered_logo = logos[json_distro['logo']]
 			else:
-				size = QSize()
-				size.setHeight(100)
-				size.setWidth(100)
-				rendered_logo = QIcon(json_distro['logo']).pixmap(size)
+				icon = QIcon(json_distro['logo'])
+				size = self.height_for_width(icon, 100)
+				rendered_logo = icon.pixmap(size)
 				logos[json_distro['logo']] = rendered_logo
 			distro = Distro(json_distro['name'], json_distro['file'], json_distro['logo'], rendered_logo, json_distro['description'])
 			distros.append(distro)
@@ -97,6 +95,18 @@ class Toaster(QMainWindow):
 		dbus = QDBusConnection.systemBus()
 		dbus.connect('org.freedesktop.UDisks2', '/org/freedesktop/UDisks2', 'org.freedesktop.DBus.ObjectManager', 'InterfacesAdded', self.handle_dbus_add)
 		dbus.connect('org.freedesktop.UDisks2', '/org/freedesktop/UDisks2', 'org.freedesktop.DBus.ObjectManager', 'InterfacesRemoved', self.handle_dbus_remove)
+
+	def height_for_width(self, icon: QIcon, height: int) -> QSize:
+		size = QSize()
+		size.setWidth(height)
+		size.setHeight(height)
+		actual = icon.actualSize(size)
+		if actual.height() != height:
+			ratio = actual.width() / actual.height()
+			width = int(ratio * height)
+			size.setWidth(width)
+			size.setHeight(height)
+		return size
 
 	def window(self):
 		# noinspection PyArgumentList
@@ -237,60 +247,48 @@ class DistroList(QWidget):
 		# TODO: better shortcuts than Alt+P and Alt+N
 		# TODO: no text, just buttons. LARGE buttons.
 		# noinspection PyArgumentList
-		grid.addWidget(make_button('&Previous', self.scroll_left, icon.fromTheme('arrow-left')), 1, 0)
-
-		self.distro_widget = DistroView(distros[0])
+		grid.addWidget(make_button('&Previous', self.scroll_left, icon.fromTheme('arrow-left')), 2, 0)
 		# noinspection PyArgumentList
-		grid.addWidget(self.distro_widget, 1, 1)
+		grid.addWidget(make_button('&Next', self.scroll_right, icon.fromTheme('arrow-right')), 2, 2)
 
+		# Icon
+		self.icon_widget = QLabel(self)
+		self.icon_widget.setAlignment(QtCore.Qt.AlignCenter)
 		# noinspection PyArgumentList
-		grid.addWidget(make_button('&Next', self.scroll_right, icon.fromTheme('arrow-right')), 1, 2)
+		grid.addWidget(self.icon_widget, 1, 0, 1, 3)
+
+		self.title_widget = QLabel(self)
+		self.title_widget.setAlignment(QtCore.Qt.AlignCenter)
+		# noinspection PyArgumentList
+		grid.addWidget(self.title_widget, 2, 1)
+
+		self.description_widget = QLabel(self)
+		# self.description_widget.setAlignment(QtCore.Qt.AlignCenter)
+		self.description_widget.setWordWrap(True)
+		# noinspection PyArgumentList
+		grid.addWidget(self.description_widget, 3, 1)
+		# Spanning all three columns: grid.addWidget(self.description_widget, 3, 0, 1, 3)
+
+		self.set_distro(self.list[0])
+
+	def set_distro(self, distro: Distro):
+		self.title_widget.setText(f"<h2>{distro.name}</h2>")
+		self.description_widget.setText(distro.description)
+		self.icon_widget.setPixmap(distro.rendered_logo)
 
 	def scroll_left(self):
 		self.position -= 1
 		if self.position < 0:
 			self.position = len(self.list) - 1
-		self.distro_widget.set_distro(self.list[self.position])
+		self.set_distro(self.list[self.position])
 
 	def scroll_right(self):
 		self.position += 1
 		self.position %= len(self.list)
-		self.distro_widget.set_distro(self.list[self.position])
+		self.set_distro(self.list[self.position])
 
 	def get_current(self) -> Distro:
 		return self.list[self.position]
-
-
-class DistroView(QWidget):
-	def __init__(self, distro: Distro):
-		# noinspection PyArgumentList
-		super().__init__()
-		stack = QVBoxLayout()
-		self.setLayout(stack)
-		self.distro = None
-
-		self.icon_widget = QLabel(self)
-		self.icon_widget.setAlignment(QtCore.Qt.AlignCenter)
-		# noinspection PyArgumentList
-		stack.addWidget(self.icon_widget)
-		self.title_widget = QLabel(self)
-		self.title_widget.setAlignment(QtCore.Qt.AlignCenter)
-		# noinspection PyArgumentList
-		stack.addWidget(self.title_widget)
-		self.description_widget = QLabel(self)
-		# self.description_widget.setAlignment(QtCore.Qt.AlignCenter)
-		self.description_widget.setWordWrap(True)
-		# noinspection PyArgumentList
-		stack.addWidget(self.description_widget)
-		stack.addStretch()
-
-		self.set_distro(distro)
-
-	def set_distro(self, distro: Distro):
-		self.distro = distro
-		self.title_widget.setText(f"<h2>{distro.name}</h2>")
-		self.description_widget.setText(distro.description)
-		self.icon_widget.setPixmap(distro.rendered_logo)
 
 
 class DriveListItem(QListWidgetItem):
