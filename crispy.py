@@ -164,26 +164,26 @@ class ToastThreadParams:
 	open_dev: BinaryIO = field(init=False)
 
 	def __enter__(self):
-		if not self._opened:
-			self.open_iso = open(self.distro.file, 'rb')
-			try:
-				self.open_dev = open(self.dev_path, 'wb')
-			except PermissionError:
-				# TODO: this is ugly. Is there any alternative? Does that throw a PermissionError, anyway?
-				subprocess.call(['sudo', 'chmod', 'o+w', self.dev_path])
-			self._opened = True
-		return self
+		if self.size < 0:
+			self.size = os.path.getsize(self.distro.file)  # Retry just to raise the exception here
+		self.open_iso = open(self.distro.file, 'rb')
+		try:
+			self.open_dev = open(self.dev_path, 'wb')
+		except PermissionError:
+			# TODO: this is ugly. Is there any alternative? Does that throw a PermissionError, anyway?
+			subprocess.call(['sudo', 'chmod', 'o+w', self.dev_path])
+			self.open_dev = open(self.dev_path, 'wb')
 
 	def __exit__(self, exc_type, exc_value, traceback):
 		self.open_iso.close()
 		self.open_dev.close()
-		self._opened = False
 
 	def __post_init__(self):
-		self._opened = False
-		self.size = os.path.getsize(self.distro.file)
-		self.__enter__() # TODO: do not __enter__ here (but threads need to be able to signal errors)
-		# self.dev_path = self.devstring[self.devstring.rfind('(')+1:self.devstring.rfind(')')]
+		try:
+			self.size = os.path.getsize(self.distro.file)
+		except FileNotFoundError:
+			# Throwing an exception here makes everything more difficult...
+			self.size = -1
 
 
 class Toaster(QMainWindow):
@@ -198,7 +198,7 @@ class Toaster(QMainWindow):
 		parser.set_defaults(kiosk=False)
 		args = parser.parse_args(argv[1:])
 		self.kiosk = args.kiosk
-		self.threads = set()
+		self.threads = dict()
 		filename = args.json
 
 		if filename is None:
@@ -338,34 +338,48 @@ class Toaster(QMainWindow):
 			self.try_start_thread(selected)
 
 	def try_start_thread(self, selected: DriveListItem):
-		try:
-			# Create params (checks that files exist and open them)
-			params = ToastThreadParams(selected.devstring, selected.devpath, self.distro_widget.get_current(), self.progress_signal)
-		except FileNotFoundError as e:
-			msg_box = QMessageBox(self)
-			msg_box.setIcon(3)  # Apparently QMessageBox.Critical doesn't exist even though it should, but it's number 3
-			msg_box.setText(f'Cannot open {e.filename}: {e.strerror}')
-			msg_box.setStandardButtons(QMessageBox.Ok)
-			msg_box.exec()
-			return
-
 		# Prevent clicking on it again
 		self.drives_list.set_toasting(selected)
 		self.drives_list.clearSelection()
 
 		# Create progress bar
-		# TODO: maximum (get size from ToastThreadParams)
-		progress = QProgressBar()
-		self.progress_area.addWidget(progress, 0, QtCore.Qt.AlignTop)
+		progress_bar = QProgressBar()
+		self.progress_area.addWidget(progress_bar, 0, QtCore.Qt.AlignTop)
+
+		# Wrap parameters in a data class
+		params = ToastThreadParams(selected.devstring, selected.devpath, self.distro_widget.get_current(),
+			self.progress_signal, progress_bar)
 
 		# Start thread
 		thread = ToastThread(params)
-		self.threads.add(thread)
+		self.threads[selected.devstring] = thread
+		thread.finished.connect(self.toaster_finished)
 		thread.start()
 
 	@pyqtSlot(str, int, name='toaster_signaled')
 	def toaster_signaled(self, devstr: str, written: int):
 		print(f"Signal signaled: {written} bytes written on {devstr}")
+
+	@pyqtSlot(name='toaster_finished')
+	def toaster_finished(self):
+		# TODO: get thread id/name/devstring. HOW? HOW 2 DO DAT? Create another event, just because?
+		msg_box = QMessageBox(self)
+		msg_box.setStandardButtons(QMessageBox.Ok)
+
+		if error is None:
+			msg_box.setIcon(QMessageBox.Information)
+			msg_box.setText(f'Cannot open {e.filename}: {e.strerror}')
+		elif error is FileNotFoundError:
+
+			msg_box.setIcon(3)  # Apparently QMessageBox.Critical doesn't exist even though it should, but it's number 3
+
+		else:
+			msg_box.setIcon(3)
+			msg_box.setText(f'Cannot open {e.filename}: {e.strerror}')
+
+		self.drives_list.unset_toasting(devstring)
+		del self.threads[devstring]
+		msg_box.exec()
 
 	# Good example (the only one that exists, actually): https://stackoverflow.com/q/38142809
 	@pyqtSlot(QDBusMessage, name='handle_dbus_add')
@@ -458,9 +472,9 @@ class ToastThread(QThread):
 
 	def run(self):
 		self.begin_time.currentDateTime()
-		for i in range(1, 100):
+		for i in range(1, 5):
 			# TODO: actually write
-			self.signal.emit(self.devstring, 4096)
+			self.params.progress.emit(self.params.devstring, 4096)
 			self.sleep(1)
 		self.end_time.currentDateTime()
 
