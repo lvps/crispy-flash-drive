@@ -157,7 +157,8 @@ class ToastThreadParams:
 	devstring: str
 	dev_path: str
 	distro: Distro
-	progress: pyqtSignal
+	progress_signal: pyqtSignal
+	finished_signal: pyqtSignal
 	written: int = 0
 	size: int = field(init=False)
 	open_iso: BinaryIO = field(init=False)
@@ -190,6 +191,7 @@ class Toaster(QMainWindow):
 
 	# Only works if placed HERE
 	progress_signal = pyqtSignal(str, int)
+	finished_signal = pyqtSignal(str, Exception)
 
 	def __init__(self, argv: List[str]):
 		parser = argparse.ArgumentParser(description='"Toast" Linux distros or other ISO files on USB drives.')
@@ -353,29 +355,28 @@ class Toaster(QMainWindow):
 		# Start thread
 		thread = ToastThread(params)
 		self.threads[selected.devstring] = thread
-		thread.finished.connect(self.toaster_finished)
+		self.finished_signal.connect(self.toaster_finished)
 		thread.start()
 
 	@pyqtSlot(str, int, name='toaster_signaled')
 	def toaster_signaled(self, devstr: str, written: int):
 		print(f"Signal signaled: {written} bytes written on {devstr}")
 
-	@pyqtSlot(name='toaster_finished')
-	def toaster_finished(self):
-		# TODO: get thread id/name/devstring. HOW? HOW 2 DO DAT? Create another event, just because?
+	@pyqtSlot(str, Exception, name='toaster_finished')
+	def toaster_finished(self, devstring: str, error: Exception):
 		msg_box = QMessageBox(self)
 		msg_box.setStandardButtons(QMessageBox.Ok)
 
 		if error is None:
 			msg_box.setIcon(QMessageBox.Information)
-			msg_box.setText(f'Cannot open {e.filename}: {e.strerror}')
+			msg_box.setText("Done toasting! Remove " + devstring)
 		elif error is FileNotFoundError:
-
+			error: FileNotFoundError
 			msg_box.setIcon(3)  # Apparently QMessageBox.Critical doesn't exist even though it should, but it's number 3
-
+			msg_box.setText(f'Cannot open {error.filename}: {error.strerror}')
 		else:
 			msg_box.setIcon(3)
-			msg_box.setText(f'Cannot open {e.filename}: {e.strerror}')
+			msg_box.setText(f'Error: {str(error)}')
 
 		self.drives_list.unset_toasting(devstring)
 		del self.threads[devstring]
@@ -471,12 +472,17 @@ class ToastThread(QThread):
 		self.wait()
 
 	def run(self):
-		self.begin_time.currentDateTime()
-		for i in range(1, 5):
-			# TODO: actually write
-			self.params.progress.emit(self.params.devstring, 4096)
-			self.sleep(1)
-		self.end_time.currentDateTime()
+		try:
+			self.begin_time.currentDateTime()
+			for i in range(1, 5):
+				# TODO: actually write
+				self.params.progress_signal.emit(self.params.devstring, 4096)
+				self.sleep(1)
+			self.end_time.currentDateTime()
+		except Exception as e:
+			self.params.finished_signal.emit(self.params.devstring, e)
+			return
+		self.params.finished_signal.emit(self.params.devstring, None)
 
 
 if __name__ == '__main__':
