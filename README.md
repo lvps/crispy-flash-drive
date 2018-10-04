@@ -1,6 +1,6 @@
 # Crispy Flash Drive
 
-Bake Gnu/Linux distros (or any other iso file) on USB flash drives. A 
+Bake GNU/Linux distros (or any other iso file) on USB flash drives. A 
 kind of [Freedom Toaster](https://en.wikipedia.org/wiki/Freedom_Toaster).
 
 ## Installation
@@ -13,4 +13,4 @@ Requires Python 3.
 
 To run:
 
-    python cris.py
+    python crispy.py
