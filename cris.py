@@ -157,8 +157,10 @@ class ToastThreadParams:
 	devstring: str
 	dev_path: str
 	distro: Distro
+	started_signal: pyqtSignal
 	progress_signal: pyqtSignal
 	finished_signal: pyqtSignal
+	progress_bar: QProgressBar  # I don't think it's a good idea to call anything on this from threads, but it's useful in main thread
 	written: int = 0
 	size: int = field(init=False)
 	open_iso: BinaryIO = field(init=False)
@@ -190,8 +192,9 @@ class ToastThreadParams:
 class Toaster(QMainWindow):
 
 	# Only works if placed HERE
-	progress_signal = pyqtSignal(str, int)
-	finished_signal = pyqtSignal(str, Exception)
+	started_signal = pyqtSignal(str, int)
+	progress_signal = pyqtSignal(str)
+	finished_signal = pyqtSignal(str, int, str)
 
 	def __init__(self, argv: List[str]):
 		parser = argparse.ArgumentParser(description='"Toast" Linux distros or other ISO files on USB drives.')
@@ -351,42 +354,54 @@ class Toaster(QMainWindow):
 
 		# Wrap parameters in a data class
 		params = ToastThreadParams(selected.devstring, selected.devpath, self.distro_widget.get_current(),
-			self.progress_signal, progress_bar)
+			self.started_signal, self.progress_signal, self.finished_signal, progress_bar)
 
 		# Start thread
 		thread = ToastThread(params)
 		self.threads[selected.devstring] = thread
 		self.parameters[selected.devstring] = params
+		self.started_signal.connect(self.toaster_started)
 		self.finished_signal.connect(self.toaster_finished)
 		thread.start()
 
 	@pyqtSlot(str, int, name='toaster_signaled')
-	def toaster_started(self, devstr: str):
-		print(f"Signal signaled: start {devstr}")
+	def toaster_started(self, devstr: str, max_bytes: int):
+		print(f"Signal signaled: start {devstr}, size {max_bytes}")
+		bar: QProgressBar = self.parameters[devstr].progress_bar
+		bar.setMinimum(0)
+		bar.setMaximum(max_bytes)
+		bar.setValue(0)
 
-	@pyqtSlot(str, int, name='toaster_signaled')
-	def toaster_signaled(self, devstr: str, written: int):
-		print(f"Signal signaled: {written} bytes written on {devstr}")
+	@pyqtSlot(str, name='toaster_signaled')
+	def toaster_signaled(self, devstr: str):
+		bar: QProgressBar = self.parameters[devstr].progress_bar
+		total: int = self.parameters[devstr].written
+		bar.setValue(total)
+		print(f"Signal signaled: {total} bytes written on {devstr} in total")
 
-	@pyqtSlot(str, Exception, name='toaster_finished')
-	def toaster_finished(self, devstring: str, error: Exception):
+	@pyqtSlot(str, int, str, name='toaster_finished')
+	def toaster_finished(self, devstring: str, return_code_like_its_1984: int, strerror: str):
 		msg_box = QMessageBox(self)
 		msg_box.setStandardButtons(QMessageBox.Ok)
 
-		if error is None:
+		if return_code_like_its_1984 is 0:
 			msg_box.setIcon(QMessageBox.Information)
 			msg_box.setText("Done toasting! Remove " + devstring)
-		elif error is FileNotFoundError:
-			error: FileNotFoundError
+		elif return_code_like_its_1984 is 1:
 			msg_box.setIcon(3)  # Apparently QMessageBox.Critical doesn't exist even though it should, but it's number 3
-			msg_box.setText(f'Cannot open {error.filename}: {error.strerror}')
+			msg_box.setText(f'Cannot open file: {strerror}')
 		else:
 			msg_box.setIcon(3)
-			msg_box.setText(f'Error: {str(error)}')
+			msg_box.setText(f'Fatal error: {strerror}')
 
+		delete_that_bar: QProgressBar = self.parameters[devstring].progress_bar
+		self.progress_area.removeWidget(delete_that_bar)
+		delete_that_bar.deleteLater()
+		delete_that_bar = None
 		self.drives_list.unset_toasting(devstring)
 		del self.threads[devstring]
 		del self.parameters[devstring]
+
 		msg_box.exec()
 
 	# Good example (the only one that exists, actually): https://stackoverflow.com/q/38142809
@@ -471,8 +486,8 @@ class DistroList(QWidget):
 class ToastThread(QThread):
 	def __init__(self, params: ToastThreadParams):
 		QThread.__init__(self)
-		self.begin_time = QDateTime()
-		self.end_time = QDateTime()
+		# self.begin_time = QDateTime()
+		# self.end_time = QDateTime()
 		self.params = params
 
 	def __del__(self):
@@ -480,16 +495,22 @@ class ToastThread(QThread):
 
 	def run(self):
 		try:
-			self.begin_time.currentDateTime()
-			for i in range(1, 5):
+			self.params.started_signal.emit(self.params.devstring, 4096*5)
+			self.sleep(1)
+			# self.begin_time.currentDateTime()
+			for i in range(0, 5):
 				# TODO: actually write
-				self.params.progress_signal.emit(self.params.devstring, 4096)
+				self.params.written += 4096
+				self.params.progress_signal.emit(self.params.devstring)
 				self.sleep(1)
-			self.end_time.currentDateTime()
-		except Exception as e:
-			self.params.finished_signal.emit(self.params.devstring, e)
+			# self.end_time.currentDateTime()
+		except FileNotFoundError as e:
+			self.params.finished_signal.emit(self.params.devstring, 1, e.strerror)
 			return
-		self.params.finished_signal.emit(self.params.devstring, None)
+		except Exception as e:
+			self.params.finished_signal.emit(self.params.devstring, 2, e.__class__.__name__)
+			return
+		self.params.finished_signal.emit(self.params.devstring, 0, "")
 
 
 if __name__ == '__main__':
