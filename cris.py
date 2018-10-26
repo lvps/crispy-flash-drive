@@ -17,7 +17,7 @@ from PyQt5.QtWidgets import QApplication, QWidget, QPushButton, QDesktopWidget, 
 	QHBoxLayout, QVBoxLayout, QListWidget, QListWidgetItem, QFileDialog, QMessageBox, QProgressBar
 from dataclasses import dataclass, field
 from typing import List, BinaryIO
-import sendfile
+# import sendfile
 
 
 def make_button(text: str, action, icon=None, tooltip=''):
@@ -389,6 +389,9 @@ class Toaster(QMainWindow):
 
 		if return_code_like_its_1984 is 0:
 			msg_box.setIcon(QMessageBox.Information)
+			# Probably useless, but still...
+			if devstring in self.parameters:
+				subprocess.call(['sudo', 'eject', self.parameters[devstring].dev_path])
 			msg_box.setText("Done toasting! Remove " + devstring)
 		elif return_code_like_its_1984 is 1:
 			msg_box.setIcon(3)  # Apparently QMessageBox.Critical doesn't exist even though it should, but it's number 3
@@ -405,10 +408,10 @@ class Toaster(QMainWindow):
 			# since someone on Stack Overflow uses it... https://stackoverflow.com/a/5942786
 			# noinspection PyUnusedLocal
 			delete_that_bar = None
-			subprocess.call(['sudo', 'eject', self.parameters[devstring].dev_path])
 			del self.parameters[devstring]
 		self.drives_list.unset_toasting(devstring)
 		del self.threads[devstring]
+		self.drives_list.refresh()
 
 		msg_box.exec()
 
@@ -506,14 +509,28 @@ class ToastThread(QThread):
 			with self.params:
 				self.params.started_signal.emit(self.params.devstring, self.params.size)
 				# self.begin_time.currentDateTime()
-				self.params.written = 0
+
+				# Too fast
+				# self.params.written = 0
+				# while True:
+				# 	sent = sendfile.sendfile(self.params.open_dev.fileno(), self.params.open_iso.fileno(), self.params.written, 65536)
+				# 	if sent == 0:
+				# 		# end of file
+				# 		break
+				# 	self.params.written += sent
+				# 	self.params.progress_signal.emit(self.params.devstring)
+
 				while True:
-					sent = sendfile.sendfile(self.params.open_dev.fileno(), self.params.open_iso.fileno(), self.params.written, 65536)
-					if sent == 0:
+					chunk = self.params.open_iso.read(65536)
+					if not chunk:
 						# end of file
 						break
+					sent = self.params.open_dev.write(chunk)
+					if sent < len(chunk):
+						raise IOError(f"Wrote {sent} bytes out of {len(chunk)} read")
 					self.params.written += sent
 					self.params.progress_signal.emit(self.params.devstring)
+
 				# self.end_time.currentDateTime()
 		except FileNotFoundError as e:
 			self.params.finished_signal.emit(self.params.devstring, 1, e.strerror)
