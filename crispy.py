@@ -201,6 +201,7 @@ class Toaster(QMainWindow):
 		args = parser.parse_args(argv[1:])
 		self.kiosk = args.kiosk
 		self.threads = dict()
+		self.parameters = dict()
 		filename = args.json
 
 		if filename is None:
@@ -355,8 +356,13 @@ class Toaster(QMainWindow):
 		# Start thread
 		thread = ToastThread(params)
 		self.threads[selected.devstring] = thread
+		self.parameters[selected.devstring] = params
 		self.finished_signal.connect(self.toaster_finished)
 		thread.start()
+
+	@pyqtSlot(str, int, name='toaster_signaled')
+	def toaster_started(self, devstr: str):
+		print(f"Signal signaled: start {devstr}")
 
 	@pyqtSlot(str, int, name='toaster_signaled')
 	def toaster_signaled(self, devstr: str, written: int):
@@ -380,6 +386,7 @@ class Toaster(QMainWindow):
 
 		self.drives_list.unset_toasting(devstring)
 		del self.threads[devstring]
+		del self.parameters[devstring]
 		msg_box.exec()
 
 	# Good example (the only one that exists, actually): https://stackoverflow.com/q/38142809
