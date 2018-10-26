@@ -11,6 +11,9 @@ Requires Python 3.
     source venv/bin/activate
     python setup.py
 
+Or, since apparently setup.py doesn't work, install `python-pyqt5`, `python-pysendfile` and `qt5-svg` (Arch Linux package names).
+Or send a pull request with a working setup.py or anything similar, I'd really appreciate that.
+
 To run:
 
     python cris.py

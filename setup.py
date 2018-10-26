@@ -7,5 +7,5 @@ setup(name='Crispy Flash Drive',
 	description='Crispy Flash Drive',
 	author='lvps',
 	url='https://github.com/lvps/crispy-flash-drive',
-	install_requires=['PyQt5'],
+	install_requires=['PyQt5', 'pysendfile'],
 )

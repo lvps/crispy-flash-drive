@@ -4,7 +4,7 @@ import sys
 
 import argparse
 from PyQt5.QtDBus import QDBusConnection, QDBusMessage
-from PyQt5.QtGui import QIcon, QPixmap  # QFontMetrics, QFont
+from PyQt5.QtGui import QIcon, QPixmap
 from json import JSONDecodeError
 from multiprocessing import Lock
 
@@ -12,11 +12,12 @@ import json
 import subprocess
 # noinspection PyUnresolvedReferences
 from PyQt5 import QtCore, QtGui
-from PyQt5.QtCore import QDateTime, QSize, pyqtSlot, QThread, pyqtSignal
+from PyQt5.QtCore import QSize, pyqtSlot, QThread, pyqtSignal  # QDateTime
 from PyQt5.QtWidgets import QApplication, QWidget, QPushButton, QDesktopWidget, QMainWindow, QGridLayout, QLabel, \
 	QHBoxLayout, QVBoxLayout, QListWidget, QListWidgetItem, QFileDialog, QMessageBox, QProgressBar
 from dataclasses import dataclass, field
 from typing import List, BinaryIO
+import sendfile
 
 
 def make_button(text: str, action, icon=None, tooltip=''):
@@ -47,7 +48,7 @@ class DriveList(QListWidget):
 		# noinspection PyArgumentList
 		super().__init__()
 		self.devices = dict()
-		self.toasting_lock = Lock()
+		self.toasting_lock = Lock()  # TODO: this is probably useless (methods called only in main thread)
 		self.toasting = dict()
 		self.system_drives = set()
 		# Enable to limit DriveList height (e.g. to 6 lines)
@@ -173,7 +174,8 @@ class ToastThreadParams:
 		try:
 			self.open_dev = open(self.dev_path, 'wb')
 		except PermissionError:
-			# TODO: this is ugly. Is there any alternative? Does that throw a PermissionError, anyway?
+			# TODO: this is ugly but works. Is there any alternative?
+			print(f"chmodding {self.dev_path}...")
 			subprocess.call(['sudo', 'chmod', 'o+w', self.dev_path])
 			self.open_dev = open(self.dev_path, 'wb')
 
@@ -257,6 +259,7 @@ class Toaster(QMainWindow):
 		dbus.connect('org.freedesktop.UDisks2', '/org/freedesktop/UDisks2', 'org.freedesktop.DBus.ObjectManager', 'InterfacesAdded', self.handle_dbus_add)
 		dbus.connect('org.freedesktop.UDisks2', '/org/freedesktop/UDisks2', 'org.freedesktop.DBus.ObjectManager', 'InterfacesRemoved', self.handle_dbus_remove)
 
+	# noinspection PyMethodMayBeStatic
 	def height_for_width(self, icon: QIcon, height: int) -> QSize:
 		size = QSize()
 		size.setWidth(height)
@@ -394,13 +397,18 @@ class Toaster(QMainWindow):
 			msg_box.setIcon(3)
 			msg_box.setText(f'Fatal error: {strerror}')
 
-		delete_that_bar: QProgressBar = self.parameters[devstring].progress_bar
-		self.progress_area.removeWidget(delete_that_bar)
-		delete_that_bar.deleteLater()
-		delete_that_bar = None
+		# It should always be there, buuuut...
+		if devstring in self.parameters:
+			delete_that_bar: QProgressBar = self.parameters[devstring].progress_bar
+			self.progress_area.removeWidget(delete_that_bar)
+			delete_that_bar.deleteLater()
+			# since someone on Stack Overflow uses it... https://stackoverflow.com/a/5942786
+			# noinspection PyUnusedLocal
+			delete_that_bar = None
+			subprocess.call(['sudo', 'eject', self.parameters[devstring].dev_path])
+			del self.parameters[devstring]
 		self.drives_list.unset_toasting(devstring)
 		del self.threads[devstring]
-		del self.parameters[devstring]
 
 		msg_box.exec()
 
@@ -436,7 +444,7 @@ class DistroList(QWidget):
 		self.setLayout(grid)
 
 		icon = QIcon()
-		# TODO: better shortcuts than Alt+P and Alt+N
+		# TODO: better shortcuts than Alt+letter
 		# TODO: no text, just buttons. LARGE buttons.
 		# noinspection PyArgumentList
 		grid.addWidget(make_button('&Previous', self.scroll_left, icon.fromTheme('arrow-left')), 2, 0)
@@ -495,15 +503,18 @@ class ToastThread(QThread):
 
 	def run(self):
 		try:
-			self.params.started_signal.emit(self.params.devstring, 4096*5)
-			self.sleep(1)
-			# self.begin_time.currentDateTime()
-			for i in range(0, 5):
-				# TODO: actually write
-				self.params.written += 4096
-				self.params.progress_signal.emit(self.params.devstring)
-				self.sleep(1)
-			# self.end_time.currentDateTime()
+			with self.params:
+				self.params.started_signal.emit(self.params.devstring, self.params.size)
+				# self.begin_time.currentDateTime()
+				self.params.written = 0
+				while True:
+					sent = sendfile.sendfile(self.params.open_dev.fileno(), self.params.open_iso.fileno(), self.params.written, 65536)
+					if sent == 0:
+						# end of file
+						break
+					self.params.written += sent
+					self.params.progress_signal.emit(self.params.devstring)
+				# self.end_time.currentDateTime()
 		except FileNotFoundError as e:
 			self.params.finished_signal.emit(self.params.devstring, 1, e.strerror)
 			return
