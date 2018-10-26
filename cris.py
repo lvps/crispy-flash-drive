@@ -17,7 +17,7 @@ from PyQt5.QtWidgets import QApplication, QWidget, QPushButton, QDesktopWidget, 
 	QHBoxLayout, QVBoxLayout, QListWidget, QListWidgetItem, QFileDialog, QMessageBox, QProgressBar
 from dataclasses import dataclass, field
 from typing import List, BinaryIO
-# import sendfile
+import sendfile
 
 
 def make_button(text: str, action, icon=None, tooltip=''):
@@ -510,26 +510,26 @@ class ToastThread(QThread):
 				self.params.started_signal.emit(self.params.devstring, self.params.size)
 				# self.begin_time.currentDateTime()
 
-				# Too fast
-				# self.params.written = 0
-				# while True:
-				# 	sent = sendfile.sendfile(self.params.open_dev.fileno(), self.params.open_iso.fileno(), self.params.written, 65536)
-				# 	if sent == 0:
-				# 		# end of file
-				# 		break
-				# 	self.params.written += sent
-				# 	self.params.progress_signal.emit(self.params.devstring)
-
+				self.params.written = 0
 				while True:
-					chunk = self.params.open_iso.read(65536)
-					if not chunk:
+					sent = sendfile.sendfile(self.params.open_dev.fileno(), self.params.open_iso.fileno(), self.params.written, 65536)
+					os.fsync(self.params.open_dev.fileno())
+					if sent == 0:
 						# end of file
 						break
-					sent = self.params.open_dev.write(chunk)
-					if sent < len(chunk):
-						raise IOError(f"Wrote {sent} bytes out of {len(chunk)} read")
 					self.params.written += sent
 					self.params.progress_signal.emit(self.params.devstring)
+
+				# while True:
+				# 	chunk = self.params.open_iso.read(65536)
+				# 	if not chunk:
+				# 		# end of file
+				# 		break
+				# 	sent = self.params.open_dev.write(chunk)
+				# 	if sent < len(chunk):
+				# 		raise IOError(f"Wrote {sent} bytes out of {len(chunk)} read")
+				# 	self.params.written += sent
+				# 	self.params.progress_signal.emit(self.params.devstring)
 
 				# self.end_time.currentDateTime()
 		except FileNotFoundError as e:
