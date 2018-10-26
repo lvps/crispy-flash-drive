@@ -13,4 +13,4 @@ Requires Python 3.
 
 To run:
 
-    python crispy.py
+    python cris.py
